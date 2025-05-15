@@ -10,32 +10,121 @@ import shutil
 import sys
 import webbrowser
 from PIL import Image, ImageTk, ImageOps
+from typing import Optional, Dict, Any, List, Tuple
 
-
+# Constants for file paths and directories
 CONFIG_PATH = "config.yaml"
 BACKUP_DIR = "Save_Backup"
 LOG_FILE = "missing_subcategories.log"
+MAPPING_FILE = "ex33_mapping_full.yaml"  # Added constant for mapping file.
+PICTOS_FILE = "pictos.txt"
 
-def get_timestamp():
+def get_timestamp() -> str:
+    """
+    Generates a timestamp string in the formatMMDD-HHMMSS.
+
+    Returns:
+        str: The timestamp string.
+    """
     return time.strftime("%Y%m%d-%H%M%S")
 
-def patch_yaml_with_master():
-    with open("ex33_mapping_full.yaml", "r") as f:
-        existing_yaml = yaml.safe_load(f)
-    with open("pictos.txt", "r") as f:
-        master_lines = f.readlines()
 
-def load_config():
+def patch_yaml_with_master() -> None:
+    """
+    Patches the 'ex33_mapping_full.yaml' file with data from 'pictos.txt'.
+
+    This function reads data from 'ex33_mapping_full.yaml' and 'pictos.txt',
+    and potentially merges or updates information in the YAML file based on
+    the content of the text file.
+    """
+    try:
+        with open(MAPPING_FILE, "r") as f:
+            existing_yaml = yaml.safe_load(f)  # Load the existing YAML data
+        with open(PICTOS_FILE, "r") as f:
+            master_lines = f.readlines()  # Read lines from the text file
+
+        # Example logic:  Update quantities based on pictos.txt
+        for line in master_lines:
+            parts = line.strip().split(" ", 1)  # Split into quantity and name
+            if len(parts) == 2:
+                try:
+                    quantity = int(parts[0])
+                    item_name = parts[1].strip()
+                    for item in existing_yaml.get("items", []):
+                        if item_name.lower() in item.get("name", "").lower():  # Partial match
+                            #  Update a 'quantity' field if it exists, or add it.
+                            item["quantity"] = quantity  # Add or update quantity
+                            break #stop searching after finding one match
+                except ValueError:
+                    print(f"Skipping line: {line}. Invalid quantity.")
+
+        # Save the modified YAML
+        with open(MAPPING_FILE, "w") as f:
+            yaml.dump(existing_yaml, f, allow_unicode=True)
+
+    except FileNotFoundError as e:
+        print(f"Error: {e}.  Required files not found for patching YAML.")
+        #  Consider raising the exception or logging it.  For now, print.
+    except yaml.YAMLError as e:
+        print(f"Error: YAML error: {e}")
+        #  Handle YAML parsing errors.
+
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    Loads configuration data from 'config.yaml'.  If the file does not exist,
+    it returns a default configuration.
+
+    Returns:
+        Dict[str, Any]: The configuration data.
+    """
     if not os.path.exists(CONFIG_PATH):
-        return {"uesave_path": "~/.cargo/bin/uesave", "Allow_Updating": True, "Transparency": 0.7, "BackgroundColor": "#000001"}  # Added defaults
-    with open(CONFIG_PATH, 'r') as f:
-        return yaml.safe_load(f)
+        #  Provide default values for all expected configuration options.
+        return {
+            "uesave_path": "",  #  Changed default to empty string
+            "Allow_Updating": True,
+            "Transparency": 0.7,
+            "BackgroundColor": "#000001",
+            "DarkMode": False, # Added default value for dark mode
+        }
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            return yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        print(f"Error: YAML error while loading config: {e}")
+        #  Consider a more robust error handling strategy.
+        return {  # Return default config on error to avoid crashing.
+            "uesave_path": "",
+            "Allow_Updating": True,
+            "Transparency": 0.7,
+            "BackgroundColor": "#000001",
+            "DarkMode": False,
+        }
 
-def save_config(cfg):
-    with open(CONFIG_PATH, 'w') as f:
-        yaml.dump(cfg, f)
+
+
+def save_config(cfg: Dict[str, Any]) -> None:
+    """
+    Saves configuration data to 'config.yaml'.
+
+    Args:
+        cfg (Dict[str, Any]): The configuration data to save.
+    """
+    try:
+        with open(CONFIG_PATH, 'w') as f:
+            yaml.dump(cfg, f)
+    except yaml.YAMLError as e:
+        print(f"Error: YAML error while saving config: {e}")
+        #  Handle the error appropriately (e.g., show a message to the user).
+
+
 
 class EX33SaveEditor(ctk.CTk):
+    """
+    Main class for the EX33 Save Editor application.
+    """
+
     def __init__(self):
         super().__init__()
         self.title("EX33 Save Editor")
@@ -44,21 +133,14 @@ class EX33SaveEditor(ctk.CTk):
         self.config = load_config()
         self.uesave_path = self.config.get("uesave_path", "")
         self.allow_updating = self.config.get("Allow_Updating", True)
-        self.transparency = self.config.get("Transparency", 0.7) # Load from config
-        self.background_color = self.config.get("BackgroundColor", "#000001") # Load from config
+        self.transparency = self.config.get("Transparency", 0.7)  # Load from config
+        self.background_color = self.config.get("BackgroundColor", "#000001")  # Load from config
+        self.dark_mode = self.config.get("DarkMode", False) # Load dark mode setting
 
-        if not self.uesave_path or not os.path.exists(self.uesave_path):
-            messagebox.showwarning("Set uesave path", "Please locate your 'uesave' executable") # Changed message
-            path = filedialog.askopenfilename(title="Select uesave executable", filetypes=[("All Files", "*")]) # Changed title and filetypes to show all files
-            if path:
-                self.uesave_path = path
-                self.config["uesave_path"] = path
-                save_config(self.config)
+        # Apply the theme
+        self.set_theme(self.dark_mode)
 
-        #Force overwrite the path, comment out if not needed
-        self.uesave_path = "~/.cargo/bin/uesave"
-        self.config["uesave_path"] = self.uesave_path
-        save_config(self.config)
+        self._configure_uesave_path()  # Moved uesave path check to its own method
 
         self.mapping = self.load_mapping()
         self.items = self.mapping.get("items", [])
@@ -77,62 +159,55 @@ class EX33SaveEditor(ctk.CTk):
         self.search_var = ctk.StringVar()
         self.search_highlight = ctk.BooleanVar()
 
-        # for background image.
-        # self.bg_image = Image.open("th-903132539.jpg").convert("RGBA").resize((1000, 700))  # Update to your desired resolution
-        # self.bg_image.putalpha(100)  # Lower = more transparent, range 0–255
-        # self.bg_ctk_image = ctk.CTkImage(light_image=self.bg_image, size=self.bg_image.size)
-        # Load background image (must exist in the same directory or give full path)
-        #WxH 474 x 711
-        # bg_img = Image.open("th-903132539.jpg").resize((474, 200)).convert("RGBA")
-        # bg_img.putalpha(100)  # 0 = invisible, 255 = opaque
-        # self.bg_image = ctk.CTkImage(light_image=bg_img, size=(474, 200))
-
-        ##1
-        #original_img = Image.open("th-903132539.jpg").convert("RGBA")
-
-        # Use ImageOps.pad to maintain aspect ratio and fill to target size (centered, no squashing)
-        # bg_img = ImageOps.pad(original_img, (960, 500), method=Image.BICUBIC, color=(0, 0, 0, 0))  # transparent padding
-        # bg_img.putalpha(100)  # adjust transparency as needed (0–255)
-
-        # self.bg_image = ctk.CTkImage(light_image=bg_img, size=(960, 500))
-
-
-
-        ##
-
-        import sys
-        # TRANSPARENT_COLOR = '#000001'
-
-        # if sys.platform.startswith("win"):
-            # self.attributes("-transparentcolor", TRANSPARENT_COLOR)
-            # self.configure(bg=TRANSPARENT_COLOR)
-        if sys.platform.startswith("win"): # set transparency in windows
-                transparent_color = self.background_color
-                self.attributes("-transparentcolor",  transparent_color)
-                self.configure(bg=transparent_color)
-
-        elif sys.platform.startswith("darwin"): # set transparency in mac os
-                transparent_color = 'systemTransparent'
-                self.attributes("-transparent", True)
-                self.configure(bg=transparent_color)
-
-        else:
-            # Use a try-except block to handle the potential error on Linux
-            try:
-                self.attributes('-alpha', self.transparency)
-            except Exception as e:
-                print(f"Error setting transparency: {e}")
-                print("Transparency may not be fully supported on this system.")
-                # Optionally, you could set a flag here to indicate that transparency is not supported
-                # and adjust the UI accordingly (e.g., don't use transparent colors).
-                # For now, we'll just continue without transparency.
-                pass
-
-        ##
-
         self.build_ui()
 
-    def validate_categories(self):
+    def set_theme(self, dark_mode: bool):
+        """
+        Sets the application theme (light or dark mode).
+
+        Args:
+            dark_mode (bool): True for dark mode, False for light mode.
+        """
+        self.dark_mode = dark_mode
+        self.config["DarkMode"] = dark_mode #save the dark mode
+        save_config(self.config)
+        if self.dark_mode:
+            ctk.set_appearance_mode("dark")
+            self.json_bg_color = "black"
+            self.json_fg_color = "white"
+        else:
+            ctk.set_appearance_mode("light")
+            self.json_bg_color = "white"
+            self.json_fg_color = "black"
+        # Apply the theme to the JSON text widget.
+        if hasattr(self, 'json_text'): #check if json_text is created.
+            self.json_text.configure(bg=self.json_bg_color, fg=self.json_fg_color)
+
+    def _configure_uesave_path(self) -> None:
+        """
+        Configures the path to the 'uesave' executable.  If not found,
+        prompts the user to locate it.
+        """
+        if not self.uesave_path or not os.path.exists(self.uesave_path):
+            messagebox.showwarning("Set uesave path", "Please locate your 'uesave' executable")
+            path = filedialog.askopenfilename(
+                title="Select uesave executable", filetypes=[("All Files", "*")]
+            )
+            if path:
+                self.uesave_path = path
+                self.config["uesave_path"] = path
+                save_config(self.config)
+        #Remove hardcoded path
+        # # Force overwrite the path, comment out if not needed for production
+        # self.uesave_path = "~/.cargo/bin/uesave"  #  Hardcoded path
+        # self.config["uesave_path"] = self.uesave_path
+        # save_config(self.config)
+
+    def validate_categories(self) -> None:
+        """
+        Validates the categories in the item mapping.  If any items are missing
+        subcategories, it logs them and optionally adds a default subcategory.
+        """
         invalid_items = [item for item in self.items if "." not in item.get("category", "")]
         if invalid_items:
             with open(LOG_FILE, "w") as log:
@@ -140,28 +215,46 @@ class EX33SaveEditor(ctk.CTk):
                 for item in invalid_items:
                     log.write(f"- {item['name']} (category: {item.get('category')})\n")
             msg = "Some items are missing subcategories:\n" + "\n".join(
-                f"- {item['name']} (category: {item.get('category')})" for item in invalid_items)
+                f"- {item['name']} (category: {item.get('category')})" for item in invalid_items
+            )
             should_fix = messagebox.askyesno(
                 "Missing Subcategories Detected",
-                msg + "\n\nWould you like to automatically add a default subcategory ('.Default') to them?\n\nThe application will restart after applying changes."
+                msg + "\n\nWould you like to automatically add a default subcategory ('.Default') to them?\n\nThe application will restart after applying changes.",
             )
             if should_fix:
                 for item in invalid_items:
                     item["category"] = item["category"] + ".Default"
-                with open("ex33_mapping_full.yaml", "w") as f:
+                with open(MAPPING_FILE, "w") as f:
                     yaml.dump({"items": self.items}, f, allow_unicode=True)
                 messagebox.showinfo("Updated", "Subcategories added. Restarting now...")
                 self.destroy()
                 python = sys.executable
                 os.execl(python, python, *sys.argv)
 
-    def load_mapping(self):
+    def load_mapping(self) -> Dict[str, Any]:
+        """
+        Loads the item mapping from 'ex33_mapping_full.yaml'.
+
+        Returns:
+            Dict[str, Any]: The item mapping data.
+        """
         if self.allow_updating:
             patch_yaml_with_master()
-        with open("ex33_mapping_full.yaml", "r") as f:
-            return yaml.safe_load(f)
+        try:
+            with open(MAPPING_FILE, "r") as f:
+                return yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            print(f"Error loading mapping: {e}")
+            return {}  # Return empty dict on error to prevent crashing
 
-    def get_structured_categories(self):
+    def get_structured_categories(self) -> Dict[str, List[str]]:
+        """
+        Structures the categories from the item mapping into a dictionary.
+
+        Returns:
+            Dict[str, List[str]]: A dictionary where keys are main categories
+            and values are lists of subcategories.
+        """
         structured = {}
         for item in self.items:
             if "." in item["category"]:
@@ -169,10 +262,13 @@ class EX33SaveEditor(ctk.CTk):
                 structured.setdefault(main, set()).add(sub)
         return {k: sorted(v) for k, v in structured.items()}
 
-    def build_ui(self):
-        # toolbar = ctk.CTkScrollableFrame(self, height=60)
+    def build_ui(self) -> None:
+        """
+        Builds the user interface for the application.
+        """
+        # Toolbar
         toolbar = ctk.CTkFrame(self, height=40)
-        toolbar.pack_propagate(False)  # Prevent auto-expanding height
+        toolbar.pack_propagate(False)
         toolbar.pack(pady=5, fill="x", padx=5)
 
         ctk.CTkButton(toolbar, text="Open Save File", command=self.load_sav).pack(side="left", padx=5)
@@ -185,13 +281,24 @@ class EX33SaveEditor(ctk.CTk):
             toolbar,
             text="Allow Updating",
             variable=ctk.BooleanVar(value=self.allow_updating),
-            command=self.toggle_allow_updating
+            command=self.toggle_allow_updating,
         )
         self.allow_update_check.pack(side="left", padx=5)
-        self.allow_update_check.bind("<Enter>", lambda e: self.show_tooltip("Toggle auto-update of YAML mapping on startup"))
+        self.allow_update_check.bind(
+            "<Enter>", lambda e: self.show_tooltip("Toggle auto-update of YAML mapping on startup")
+        )
         self.allow_update_check.bind("<Leave>", lambda e: self.hide_tooltip())
 
-        # Add transparency and color settings
+        # Dark mode switch
+        self.dark_mode_switch = ctk.CTkSwitch(
+            toolbar,
+            text="Dark Mode",
+            variable=ctk.BooleanVar(value=self.dark_mode),
+            command=self.toggle_dark_mode,
+        )
+        self.dark_mode_switch.pack(side="left", padx=5)
+
+        # Transparency and color settings
         transparency_frame = ctk.CTkFrame(toolbar)
         transparency_frame.pack(side="left", padx=5)
         ctk.CTkLabel(transparency_frame, text="Transparency:").pack(side="left")
@@ -199,14 +306,14 @@ class EX33SaveEditor(ctk.CTk):
         transparency_slider = ctk.CTkSlider(transparency_frame, from_=0, to=1, variable=self.transparency_var, command=self.set_transparency)
         transparency_slider.pack(side="left")
 
-        color_frame = ctk.CTkFrame(toolbar)
-        color_frame.pack(side="left", padx=5)
-        ctk.CTkLabel(color_frame, text="Background Color:").pack(side="left")
-        self.color_var = ctk.StringVar(value=self.background_color)
-        color_entry = ctk.CTkEntry(color_frame, textvariable=self.color_var, width=80)
-        color_entry.pack(side="left")
-        color_button = ctk.CTkButton(color_frame, text="Set Color", command=self.set_background_color)
-        color_button.pack(side="left")
+        # color_frame = ctk.CTkFrame(toolbar) #remove color frame
+        # color_frame.pack(side="left", padx=5)
+        # ctk.CTkLabel(color_frame, text="Background Color:").pack(side="left")
+        # self.color_var = ctk.StringVar(value=self.background_color)
+        # color_entry = ctk.CTkEntry(color_frame, textvariable=self.color_var, width=80)
+        # color_entry.pack(side="left")
+        # color_button = ctk.CTkButton(color_frame, text="Set Color", command=self.set_background_color)
+        # color_button.pack(side="left")
 
 
         # Move Search Frame here, centered under toolbar
@@ -237,7 +344,7 @@ class EX33SaveEditor(ctk.CTk):
         self.scroll_frame.pack(side=LEFT, fill=BOTH, expand=True)
 
         # Text widget for JSON display
-        self.json_text = Text(background_container, wrap="none", bg="black", fg="white", height=30, width=60)
+        self.json_text = Text(background_container, wrap="none", bg=self.json_bg_color, fg=self.json_fg_color, height=30, width=60)
         self.json_text.pack(side=RIGHT, fill=BOTH, expand=True)
 
         # Scrollbar for the text widget
@@ -259,6 +366,16 @@ class EX33SaveEditor(ctk.CTk):
     def toggle_allow_updating(self):
         self.allow_updating = not self.allow_updating
         self.config["Allow_Updating"] = self.allow_updating
+        save_config(self.config)
+
+    def toggle_dark_mode(self):
+        """
+        Toggles between light and dark mode.
+        """
+        self.dark_mode = not self.dark_mode
+        self.set_theme(self.dark_mode) #apply the theme
+        self.refresh_inputs()  # Update input colors
+        self.config["DarkMode"] = self.dark_mode
         save_config(self.config)
 
     def show_tooltip(self, text):
@@ -306,7 +423,12 @@ class EX33SaveEditor(ctk.CTk):
                 label.configure(text_color="yellow")
             label.pack()
 
-            entry = ctk.CTkEntry(self.scroll_frame, textvariable=self.input_vars[key], fg_color="black", text_color="white")
+            entry = ctk.CTkEntry(
+                self.scroll_frame,
+                textvariable=self.input_vars[key],
+                fg_color=self.json_bg_color,  # Use theme-aware colors
+                text_color=self.json_fg_color,
+            )
             entry.pack(fill="x", padx=10)
 
 
@@ -354,7 +476,11 @@ class EX33SaveEditor(ctk.CTk):
 
         json_path = sav_path.replace(".sav", ".json")
         self.current_json_path = json_path
-        result = subprocess.run([self.uesave_path, "to-json", "-i", sav_path, "-o", json_path], capture_output=True, text=True)
+        try:
+            result = subprocess.run([self.uesave_path, "to-json", "-i", sav_path, "-o", json_path], capture_output=True, text=True)
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"uesave not found at configured path: {self.uesave_path}.  Please check your config.yaml.")
+            return
 
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -406,9 +532,7 @@ class EX33SaveEditor(ctk.CTk):
 
         for k, v in self.full_json.get("root", {}).get("properties", {}).items():
             if k.startswith("InventoryItems_") and isinstance(v, dict) and "Map" in v:
-                v["Map"] = self.loaded_json
-
-        timestamp = get_timestamp()
+                v["Map"] = self.loaded_jsontimestamp = get_timestamp()
         os.makedirs(BACKUP_DIR, exist_ok=True)  # Ensure directory exists
         backup_json = os.path.join(BACKUP_DIR, f"{os.path.basename(self.current_json_path).replace('.json', f'_BACKUP-{timestamp}.json')}")
         try:
@@ -433,8 +557,12 @@ class EX33SaveEditor(ctk.CTk):
             print("from-json stdout:", result.stdout)
             print("from-json stderr:", result.stderr)
             messagebox.showinfo("Done", "Save file exported successfully.")
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"uesave not found at configured path: {self.uesave_path}.  Please check your config.yaml.")
+            return
         except Exception as e:
             messagebox.showerror("Error", f"Failed to export .sav: {e}")
+            return
 
     def display_json(self):
         if self.full_json:
@@ -456,26 +584,22 @@ class EX33SaveEditor(ctk.CTk):
             try:
                 self.attributes('-alpha', self.transparency)
             except Exception as e:
-                print(f"Error setting transparency: {e}")
+                print(f"Error setting transparency on Linux: {e}")
 
-    def set_background_color(self):
-        color = self.color_var.get()
-        if color:
-            self.background_color = color
-            self.config["BackgroundColor"] = color
-            save_config(self.config)
-            if sys.platform.startswith("win"):
-                self.attributes("-transparentcolor", self.background_color)
-                self.configure(bg=self.background_color) # set the background color
-            elif sys.platform.startswith("darwin"):
-                self.configure(bg='systemTransparent')
-            else:
-                self.configure(bg=self.background_color)
-        else:
-            messagebox.showerror("Error", "Invalid color format. Please use #RRGGBB.")
+    # def set_background_color(self): #remove set_background_color
+    #     color = self.color_var.get()
+    #     try:
+    #         self.configure(bg=color)
+    #         self.background_color = color
+    #         self.config["BackgroundColor"] = color
+    #         save_config(self.config)
+    #         if sys.platform.startswith("win"):
+    #             self.attributes("-transparentcolor", color)  # Set transparent color on Windows
+    #         self.configure(bg=color) #set the background color here too
+    #     except Exception as e:
+    #         messagebox.showerror("Error", f"Invalid color: {color}.  Please use a valid color name or #RRGGBB format. Error: {e}")
+    #         self.color_var.set(self.background_color)  # Reset to a valid color
 
 if __name__ == "__main__":
-    ctk.set_appearance_mode("Dark")
     app = EX33SaveEditor()
     app.mainloop()
-

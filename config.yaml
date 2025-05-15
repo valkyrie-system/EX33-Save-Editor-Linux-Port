@@ -1,0 +1,3 @@
+Allow_Updating: true
+Transparency: 1
+uesave_path: ~/.cargo/bin/uesave
